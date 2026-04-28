@@ -47,7 +47,7 @@ function App() {
     setMessages(prev => [...prev, assistantPlaceholder]);
 
     try {
-      const backendBaseUrl = import.meta.env.DEV ? 'http://localhost:3001' : '/_/backend';
+      const backendBaseUrl = import.meta.env.DEV ? 'http://localhost:3001' : '';
       const response = await fetch(`${backendBaseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

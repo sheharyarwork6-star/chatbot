@@ -1,0 +1,9 @@
+{
+  "name": "my-chat-bot-ai",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "axios": "^1.15.2",
+    "cheerio": "^1.2.0"
+  }
+}
