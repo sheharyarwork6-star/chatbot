@@ -11,12 +11,12 @@ function App() {
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading]);
+  }, [messages]);
 
   // Initial greeting
   useEffect(() => {
@@ -61,6 +61,7 @@ function App() {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let fullContent = '';
+      let lastUpdate = Date.now();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -76,7 +77,6 @@ function App() {
             const parsed = JSON.parse(line.slice(6));
 
             if (parsed.status === 'searching') {
-              // Show "Searching the web..." indicator
               setIsSearching(true);
               continue;
             }
@@ -85,7 +85,6 @@ function App() {
               setError(parsed.error);
               setIsLoading(false);
               setIsSearching(false);
-              // Remove placeholder
               setMessages(prev => prev.slice(0, -1));
               return;
             }
@@ -93,7 +92,22 @@ function App() {
             if (parsed.token) {
               fullContent += parsed.token;
               setIsSearching(false);
-              // Update the last message (assistant placeholder) in real-time
+
+              const now = Date.now();
+              if (now - lastUpdate > 80) {
+                lastUpdate = now;
+                setMessages(prev => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = {
+                    role: 'assistant',
+                    content: fullContent,
+                  };
+                  return updated;
+                });
+              }
+            }
+
+            if (parsed.done) {
               setMessages(prev => {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
@@ -102,9 +116,6 @@ function App() {
                 };
                 return updated;
               });
-            }
-
-            if (parsed.done) {
               setIsLoading(false);
               setIsSearching(false);
             }

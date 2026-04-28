@@ -12,7 +12,8 @@ app.use(cors());
 app.use(express.json());
 
 // Main model to use
-const MODEL_NAME = 'llama3';
+const MODEL_NAME = process.env.OLLAMA_MODEL || 'llama3';
+const SEARCH_TIMEOUT_MS = 2000;
 
 // ─────────────────────────────────────────────────────────────
 // FAST KEYWORD ROUTER — Zero AI call, instant decision (0ms)
@@ -32,13 +33,13 @@ const SEARCH_KEYWORDS = [
 function needsWebSearch(message) {
   const lower = message.toLowerCase();
 
-  // More selective: require at least 2 keywords or specific patterns
+  // More selective: require at least 3 keywords or specific patterns
   const keywordCount = SEARCH_KEYWORDS.filter(keyword => lower.includes(keyword)).length;
   const hasQuestionWords = /\b(what|who|when|where|how|why|which)\b/i.test(lower);
   const hasTimeWords = /\b(today|now|current|latest|recent)\b/i.test(lower);
 
   // Only search if: 2+ keywords, or question word + time word, or very specific queries
-  return keywordCount >= 2 || (hasQuestionWords && hasTimeWords) ||
+  return keywordCount >= 3 || (hasQuestionWords && hasTimeWords) ||
          lower.includes('what is the') || lower.includes('who is') ||
          lower.includes('how much') || lower.includes('what are');
 }
@@ -65,13 +66,13 @@ async function performSearch(query) {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
           'Accept-Language': 'en-US,en;q=0.9',
         },
-        timeout: 3000, // Reduced from 6000ms to 3000ms for faster responses
+        timeout: SEARCH_TIMEOUT_MS,
       }
     );
     const $ = cheerio.load(data);
     const results = [];
     $('.result').each((i, el) => {
-      if (i >= 3) return; // Reduced from 5 to 3 results for faster processing
+      if (i >= 2) return; // Keep only the top two results for faster parsing
       const title = $(el).find('.result__title').text().trim();
       const snippet = $(el).find('.result__snippet').text().trim();
       const url = $(el).find('.result__url').text().trim();
