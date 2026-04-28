@@ -1,18 +1,19 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { default: ollama } = require('ollama');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Main model to use
-const MODEL_NAME = process.env.OLLAMA_MODEL || 'llama3';
+// Main model to use via OpenAI
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
 const SEARCH_TIMEOUT_MS = 2000;
 
 // ─────────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ async function performSearch(query) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CHAT ENDPOINT — Streaming with SSE
+// CHAT ENDPOINT
 // ─────────────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
   try {
@@ -107,12 +108,6 @@ app.post('/api/chat', async (req, res) => {
 
     const lastUserMessage = messages[messages.length - 1].content;
 
-    // Set up SSE headers for streaming
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
     // Fast keyword-based routing (0ms)
     const searchNeeded = needsWebSearch(lastUserMessage);
     console.log(`[Router] Search needed? ${searchNeeded ? 'YES (keyword match)' : 'NO'}`);
@@ -121,9 +116,6 @@ app.post('/api/chat', async (req, res) => {
     let searchContext = '';
     if (searchNeeded) {
       console.log(`[Web Search] Fetching real-time data for: "${lastUserMessage}"`);
-      // Send a "searching" status event to the frontend
-      res.write(`data: ${JSON.stringify({ status: 'searching' })}\n\n`);
-
       const searchResults = await performSearch(lastUserMessage);
       if (searchResults) {
         searchContext = `\n\n[REAL-TIME INTERNET DATA]\n${searchResults}\n\nUse the above real-time data to accurately and concisely answer the user's question. Cite source URLs if relevant.`;
@@ -134,7 +126,10 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // System prompt
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OpenAI API key not configured. Set OPENAI_API_KEY.' });
+    }
+
     const systemPrompt = {
       role: 'system',
       content: `You are a fast, helpful AI assistant. Give direct, concise answers. Use the real-time data when available. Keep responses under 200 words.${searchContext}`,
@@ -142,45 +137,35 @@ app.post('/api/chat', async (req, res) => {
 
     const finalMessages = [systemPrompt, ...messages];
 
-    // Stream response from Ollama
-    const stream = await ollama.chat({
-      model: MODEL_NAME,
-      messages: finalMessages,
-      stream: true,
-    });
-
-    for await (const chunk of stream) {
-      const token = chunk.message?.content || '';
-      if (token) {
-        res.write(`data: ${JSON.stringify({ token })}\n\n`);
+    const completion = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: OPENAI_MODEL,
+        messages: finalMessages,
+        max_tokens: 512,
+        temperature: 0.7,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
       }
-    }
+    );
 
-    // Signal end of stream
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
+    const assistantMessage = completion.data?.choices?.[0]?.message?.content?.trim() ||
+      'I could not generate an answer right now.';
+
+    res.json({ answer: assistantMessage });
 
   } catch (error) {
     console.error('[Server Error]', error.message);
-
-    // Send error via SSE if headers already sent, else JSON
-    if (res.headersSent) {
-      let errMsg = 'An error occurred with the local AI model.';
-      if (error.message?.includes('not found')) {
-        errMsg = `Model '${MODEL_NAME}' is not installed. Run: ollama pull ${MODEL_NAME}`;
-      } else if (error.cause?.code === 'ECONNREFUSED') {
-        errMsg = 'Ollama is not running. Please start the Ollama application.';
-      }
-      res.write(`data: ${JSON.stringify({ error: errMsg })}\n\n`);
-      res.end();
-    } else {
-      res.status(500).json({ error: 'Server error. Make sure Ollama is running.' });
-    }
+    res.status(500).json({ error: 'Server error. Please check your OpenAI configuration.' });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Local AI Agent running on port ${PORT}`);
-  console.log(`   Model: ${MODEL_NAME}`);
-  console.log(`   Mode:  Streaming + Real-Time Web Search\n`);
+  console.log(`   Model: ${OPENAI_MODEL}`);
+  console.log(`   Mode: OpenAI-backed API + Real-Time Web Search\n`);
 });

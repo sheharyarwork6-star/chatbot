@@ -39,95 +39,43 @@ function App() {
     setMessages(newMessages);
     setInputMessage('');
     setIsLoading(true);
-    setIsSearching(false);
+    setIsSearching(true);
     setError(null);
 
-    // Placeholder for the streaming assistant message
+    // Placeholder for the assistant message while waiting
     const assistantPlaceholder = { role: 'assistant', content: '' };
     setMessages(prev => [...prev, assistantPlaceholder]);
 
     try {
-      const response = await fetch('http://localhost:3001/api/chat', {
+      const backendBaseUrl = import.meta.env.DEV ? 'http://localhost:3001' : '/_/backend';
+      const response = await fetch(`${backendBaseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages }),
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error('Failed to connect to the AI server.');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.error || 'Failed to connect to the AI server.');
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let fullContent = '';
-      let lastUpdate = Date.now();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop(); // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const parsed = JSON.parse(line.slice(6));
-
-            if (parsed.status === 'searching') {
-              setIsSearching(true);
-              continue;
-            }
-
-            if (parsed.error) {
-              setError(parsed.error);
-              setIsLoading(false);
-              setIsSearching(false);
-              setMessages(prev => prev.slice(0, -1));
-              return;
-            }
-
-            if (parsed.token) {
-              fullContent += parsed.token;
-              setIsSearching(false);
-
-              const now = Date.now();
-              if (now - lastUpdate > 80) {
-                lastUpdate = now;
-                setMessages(prev => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    role: 'assistant',
-                    content: fullContent,
-                  };
-                  return updated;
-                });
-              }
-            }
-
-            if (parsed.done) {
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: 'assistant',
-                  content: fullContent,
-                };
-                return updated;
-              });
-              setIsLoading(false);
-              setIsSearching(false);
-            }
-          } catch {
-            // Ignore malformed SSE lines
-          }
-        }
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error);
       }
+
+      const assistantContent = data.answer || 'Sorry, I could not generate a response.';
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: 'assistant',
+          content: assistantContent,
+        };
+        return updated;
+      });
     } catch (err) {
       console.error(err);
-      setError('Could not connect to the AI server. Make sure the backend is running.');
-      // Remove the empty placeholder
+      setError(err.message || 'Could not connect to the AI server. Make sure the backend is running.');
       setMessages(prev => prev.slice(0, -1));
     } finally {
       setIsLoading(false);
@@ -228,7 +176,7 @@ function App() {
             </button>
           </form>
           <div className="text-center mt-2 sm:mt-3 text-xs text-slate-500">
-            Powered by Ollama · llama3 · Real-time DuckDuckGo Search
+            Powered by OpenAI · Real-Time DuckDuckGo Search
           </div>
         </div>
       </footer>
